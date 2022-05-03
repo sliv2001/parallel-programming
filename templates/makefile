@@ -1,9 +1,9 @@
-all: build run
+mpi: build-mpi run-mpi
 
-build:
+build-mpi:
 	mpicxx ./main.cpp -o main
 
-run:
+run-mpi:
 	mpirun -np 16 ./main
 
 clean:

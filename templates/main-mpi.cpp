@@ -1,6 +1,8 @@
 #include <mpi.h>
 #include <iostream>
 
+#define MCW MPI_COMM_WORLD
+
 using namespace std;
 
 void abortAll(int rc, string str){
@@ -12,6 +14,7 @@ void abortAll(int rc, string str){
 int main(int argc, char* argv[]){
 /*Setup part*/
 	int rc, rank, numprocs;
+	MPI_Status status;
 	if (rc = MPI_Init(&argc, &argv))
 		abortAll(-1, "Ошибка запуска MPI");
 	MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
