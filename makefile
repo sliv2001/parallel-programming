@@ -5,3 +5,6 @@ build:
 
 run:
 	mpirun -np 16 ./main
+
+clean:
+	rm main
