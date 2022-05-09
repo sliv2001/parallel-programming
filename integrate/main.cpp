@@ -8,17 +8,22 @@
 #endif
 
 #define	RECURSION_MAX		1024
+#define BRICK_NUMBER		256
 #define INIT_ITERATION		0
 #define INIT_POINT_NUMBER	128
 #define INIT_EPSILON		0.001
+
 using namespace std;
 int threads=16;
 long double epsilon=INIT_EPSILON;
+int new_brick=0;
 
 struct thread_handle {
 	pthread_t tid;
+	pthread_mutex_t mutex;
 	long double a_local, b_local;
 	int recursion_counter;
+	int status; /*0=in progress; 1=finished; 2=ready for calculation*/
 	long double cumulative=0;
 };
 
@@ -56,27 +61,76 @@ long double integrate_recursive(long double (*f)(long double x),
 }
 
 void* worker(void* arg){
-	((struct thread_handle*)arg)->cumulative+=
-			integrate_recursive(function,
-			(struct thread_handle*)arg,
-			INIT_ITERATION, INIT_POINT_NUMBER);
+	struct thread_handle* a=((struct thread_handle*)arg);
+	while (1){
+		if (a->status==2){
+			pthread_mutex_lock(&a->mutex);
+			a->status=0;
+			pthread_mutex_unlock(&a->mutex);
+			long double res=integrate_recursive(function,
+				a, INIT_ITERATION, INIT_POINT_NUMBER);
+			pthread_mutex_lock(&a->mutex);
+			a->cumulative=res;
+			a->status=1;
+			pthread_mutex_unlock(&a->mutex);
+		}
+		else {
+			usleep(10);
+		}
+	}
 	return NULL;
 }
 
+void manage(int threads, long double epsilon, long double a, long double b){
+	struct thread_handle hs[threads];
+	long double result=0;
+	long double brick=(b-a)/BRICK_NUMBER;
+	for (int i=0; i<threads; i++){
+		hs[i].a_local=a+new_brick*brick;
+		hs[i].b_local=a+(new_brick+1)*brick>b?b:
+			a+(new_brick+1)*brick;
+		hs[i].recursion_counter=0;
+		hs[i].status=2;
+		pthread_mutex_init(&hs[i].mutex, NULL);
+		pthread_create(&hs[i].tid, NULL, worker, &hs[i]);
+		new_brick++;
+	}
+	while (new_brick<=BRICK_NUMBER){
+		for (int i=0; i<threads; i++){
+			if (pthread_mutex_trylock(&hs[i].mutex)==0 &&
+					hs[i].status==1){
+				result+=hs[i].cumulative;
+				hs[i].a_local=a+new_brick*brick;
+				hs[i].b_local=a+(new_brick+1)*brick>b?b:
+						a+(new_brick+1)*brick;
+				hs[i].recursion_counter=0;
+				if (new_brick<=BRICK_NUMBER-threads)
+					hs[i].status=2;
+				else
+					hs[i].status=3;
+				new_brick++;
+			}
+			pthread_mutex_unlock(&hs[i].mutex);
+		}
+		usleep(10);
+	}
+	cout<<result<<endl;
+}
+
 int main(int argc, char* argv[]){
-	if (argc!=3)
+	long double a, b;
+	if (argc!=5)
 		return -1;
 	threads=atoi(argv[1]);
 	epsilon = atof(argv[2]);
+	a= atof(argv[3]);
+	b=atof(argv[4]);
 	if (threads<0 || threads>THREAD_MAX)
 		return -2;
-	struct thread_handle a={
-		.tid=0,
-		.a_local=0.0,
-		.b_local=3.0,
-		.recursion_counter=0
-	};
-	worker((void*)&a);
-	cout<<a.cumulative<<endl;
+	if (epsilon<0)
+		return -3;
+	if (a>b)
+		return -4;
+	manage(threads, epsilon, a, b);
 	return 0;
 }
