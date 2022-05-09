@@ -15,7 +15,7 @@
 
 using namespace std;
 int threads=16;
-long double epsilon=INIT_EPSILON;
+long double epsilon=INIT_EPSILON, ress=0;
 int new_brick=0;
 
 struct thread_handle {
@@ -26,6 +26,16 @@ struct thread_handle {
 	int status; /*0=in progress; 1=finished; 2=ready for calculation*/
 	long double cumulative=0;
 };
+
+void prinths(int i, struct thread_handle* hs){
+//	cout<<"i="<<i;
+//	cout<<"\t tid="<< hs->tid;
+	cout<<"a="<< hs->a_local;
+	cout<<"\t b="<< hs->b_local;
+	cout<<"\t recursion="<< hs->recursion_counter;
+	cout<<"\t status="<< hs->status;
+	cout<<"\t cumulative="<<hs->cumulative<<endl;
+}
 
 long double function(long double x){
 	return sin(x);
@@ -57,6 +67,7 @@ long double integrate_recursive(long double (*f)(long double x),
 		arg->a_local, arg->b_local, 2*n);
 	if (abs(intermed - previous)>epsilon)
 		return integrate_recursive(f, arg, intermed, 2*n);
+	cout<<intermed<<endl;
 	return intermed;
 }
 
@@ -100,6 +111,7 @@ void manage(int threads, long double epsilon, long double a, long double b){
 			if (pthread_mutex_trylock(&hs[i].mutex)==0 &&
 					hs[i].status==1){
 				result+=hs[i].cumulative;
+				prinths(i, &hs[i]);
 				hs[i].a_local=a+new_brick*brick;
 				hs[i].b_local=a+(new_brick+1)*brick>b?b:
 						a+(new_brick+1)*brick;
@@ -123,6 +135,7 @@ int main(int argc, char* argv[]){
 		return -1;
 	threads=atoi(argv[1]);
 	epsilon = atof(argv[2]);
+	epsilon = epsilon/sqrt(BRICK_NUMBER);
 	a= atof(argv[3]);
 	b=atof(argv[4]);
 	if (threads<0 || threads>THREAD_MAX)
