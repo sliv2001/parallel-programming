@@ -1,3 +1,4 @@
+#include <cstring>
 #include <iostream>
 #include <pthread.h>
 #include <unistd.h>
@@ -9,14 +10,13 @@
 #endif
 
 #define	RECURSION_MAX		1024
-#define BRICK_NUMBER		256
+#define BRICK_NUMBER		1024
 #define INIT_ITERATION		0
 #define INIT_POINT_NUMBER	128
 #define INIT_EPSILON		0.001
 
 using namespace std;
-int threads=16;
-long double epsilon=INIT_EPSILON, ress=0;
+long double epsilon=INIT_EPSILON;
 
 struct thread_handle {
 	pthread_t tid;
@@ -88,12 +88,15 @@ void* worker(void* arg){
 		else {
 //			usleep(10);
 		}
+		if (a->status==3)
+			return NULL;
 	}
 	return NULL;
 }
 
-long double manage(int threads, long double epsilon, long double a, long double b){
+long double manage(int threads, long double a, long double b){
 	struct thread_handle hs[threads];
+	memset(hs, 0, sizeof(hs[0])*threads);
 	long double result=0;
 	long double brick=(b-a)/BRICK_NUMBER;
 	int new_brick=0;
@@ -134,21 +137,25 @@ long double manage(int threads, long double epsilon, long double a, long double 
 	do{
 		done=0;
 		for (int i=0; i<threads; i++){
-			if (hs[i].status==3)
+			if (hs[i].status==3){
 				done+=1;
+				pthread_cancel(hs[i].tid);
+			}
 			if (hs[i].status==1){
 				hs[i].status=3;
 				result+=hs[i].cumulative;
 				done +=1;
+				pthread_cancel(hs[i].tid);
 			}
 		}
-		usleep(10);
+//		usleep(10);
 	} while (done != threads);
 	return result;
 }
 
 int main(int argc, char* argv[]){
 	long double a, b;
+	int threads;
 	if (argc!=5)
 		return -1;
 	threads=atoi(argv[1]);
@@ -163,20 +170,23 @@ int main(int argc, char* argv[]){
 	if (a>b)
 		return -4;
 
-	clock_t start, parallel, sequential;
-	start=clock();
-	long double pres = manage(threads, epsilon, a, b);
-	parallel=clock()-start;
-	int t=threads;
-	threads=1;
-	start=clock();
-	long double sres=manage(threads, epsilon, a, b);
-	sequential=clock()-start;
+	struct timespec start, end;
+	double s, p;
+	clock_gettime(CLOCK_REALTIME, &start);
+	long double sres=manage(1, a, b);
+	clock_gettime(CLOCK_REALTIME, &end);
+	s=end.tv_sec-start.tv_sec+(end.tv_nsec-start.tv_nsec)/(double)1000000000;
+
+	clock_gettime(CLOCK_REALTIME, &start);
+	long double pres = manage(threads, a, b);
+	clock_gettime(CLOCK_REALTIME, &end);
+	p=end.tv_sec-start.tv_sec+(end.tv_nsec-start.tv_nsec)/(double)1000000000;
+
 	cout<<"Parallel program: sum="<<pres;
-	cout<<" which elapsed "<<((double)parallel)/CLOCKS_PER_SEC<<" seconds"<<endl;
+	cout<<" which elapsed "<<p<<" seconds"<<endl;
 	cout<<"Sequential program: sum="<<sres;
-	cout<<" which elapsed "<<((double)sequential)/CLOCKS_PER_SEC<<" seconds"<<endl;
-	cout<<"Acceleration S="<<(double)sequential/parallel<<endl;
-	cout<<"Efficiency E="<<(double)sequential/parallel/t<<endl;
+	cout<<" which elapsed "<<s<<" seconds"<<endl;
+	cout<<"Acceleration S="<<s/p<<endl;
+	cout<<"Efficiency E="<<s/p/threads<<endl;
 	return 0;
 }
