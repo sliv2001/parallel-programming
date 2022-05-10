@@ -17,7 +17,6 @@
 using namespace std;
 int threads=16;
 long double epsilon=INIT_EPSILON, ress=0;
-int new_brick=0;
 
 struct thread_handle {
 	pthread_t tid;
@@ -87,7 +86,7 @@ void* worker(void* arg){
 			pthread_mutex_unlock(&a->mutex);
 		}
 		else {
-			usleep(10);
+//			usleep(10);
 		}
 	}
 	return NULL;
@@ -97,7 +96,7 @@ long double manage(int threads, long double epsilon, long double a, long double 
 	struct thread_handle hs[threads];
 	long double result=0;
 	long double brick=(b-a)/BRICK_NUMBER;
-
+	int new_brick=0;
 	for (int i=0; i<threads; i++){
 		hs[i].a_local=a+new_brick*brick;
 		hs[i].b_local=a+(new_brick+1)*brick>b?b:
@@ -108,26 +107,27 @@ long double manage(int threads, long double epsilon, long double a, long double 
 		pthread_create(&hs[i].tid, NULL, worker, &hs[i]);
 		new_brick++;
 	}
-	while (new_brick<BRICK_NUMBER){
+	while (new_brick<=BRICK_NUMBER){
 		for (int i=0; i<threads; i++){
-			if (pthread_mutex_trylock(&hs[i].mutex)==0 &&
-					hs[i].status==1){
-				result+=hs[i].cumulative;
-				prinths(i, &hs[i]);
-				hs[i].a_local=a+new_brick*brick;
-				hs[i].b_local=a+(new_brick+1)*brick>b?b:
-						a+(new_brick+1)*brick;
-				hs[i].recursion_counter=0;
-				if (new_brick>=BRICK_NUMBER)
-					hs[i].status=3;
-				else{
-					hs[i].status=2;
+			if (pthread_mutex_trylock(&hs[i].mutex)==0){
+				if (hs[i].status==1){
+					result+=hs[i].cumulative;
+					prinths(i, &hs[i]);
+					hs[i].a_local=a+new_brick*brick;
+					hs[i].b_local=a+(new_brick+1)*brick>b?b:
+							a+(new_brick+1)*brick;
+					hs[i].recursion_counter=0;
+					if (new_brick>=BRICK_NUMBER)
+						hs[i].status=3;
+					else{
+						hs[i].status=2;
+					}
 					new_brick++;
 				}
+				pthread_mutex_unlock(&hs[i].mutex);
 			}
-			pthread_mutex_unlock(&hs[i].mutex);
 		}
-		usleep(10);
+//		usleep(10);
 	}
 
 	int done;
@@ -170,13 +170,13 @@ int main(int argc, char* argv[]){
 	int t=threads;
 	threads=1;
 	start=clock();
-	long double sres = 1;//manage(threads, epsilon, a, b);
+	long double sres=manage(threads, epsilon, a, b);
 	sequential=clock()-start;
 	cout<<"Parallel program: sum="<<pres;
-	cout<<" which elapsed "<<parallel<<" seconds"<<endl;
+	cout<<" which elapsed "<<((double)parallel)/CLOCKS_PER_SEC<<" seconds"<<endl;
 	cout<<"Sequential program: sum="<<sres;
-	cout<<" which elapsed "<<sequential<<" seconds"<<endl;
-	cout<<"Acceleration S="<<sequential/parallel<<endl;
-	cout<<"Efficiency E="<<sequential/parallel/t<<endl;
+	cout<<" which elapsed "<<((double)sequential)/CLOCKS_PER_SEC<<" seconds"<<endl;
+	cout<<"Acceleration S="<<(double)sequential/parallel<<endl;
+	cout<<"Efficiency E="<<(double)sequential/parallel/t<<endl;
 	return 0;
 }
