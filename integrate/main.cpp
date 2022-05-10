@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <cmath>
+#include <ctime>
 
 #ifndef	THREAD_MAX
 #define	THREAD_MAX		128
@@ -38,7 +39,7 @@ void prinths(int i, struct thread_handle* hs){
 }
 
 long double function(long double x){
-	return sin(2*M_PI*1000*x);
+	return 10*sin(2*M_PI*1000*x);
 }
 
 long double integrate(long double (*f)(long double x),
@@ -92,10 +93,11 @@ void* worker(void* arg){
 	return NULL;
 }
 
-void manage(int threads, long double epsilon, long double a, long double b){
+long double manage(int threads, long double epsilon, long double a, long double b){
 	struct thread_handle hs[threads];
 	long double result=0;
 	long double brick=(b-a)/BRICK_NUMBER;
+
 	for (int i=0; i<threads; i++){
 		hs[i].a_local=a+new_brick*brick;
 		hs[i].b_local=a+(new_brick+1)*brick>b?b:
@@ -142,7 +144,7 @@ void manage(int threads, long double epsilon, long double a, long double b){
 		}
 		usleep(10);
 	} while (done != threads);
-	cout<<result<<endl;
+	return result;
 }
 
 int main(int argc, char* argv[]){
@@ -160,6 +162,21 @@ int main(int argc, char* argv[]){
 		return -3;
 	if (a>b)
 		return -4;
-	manage(threads, epsilon, a, b);
+
+	clock_t start, parallel, sequential;
+	start=clock();
+	long double pres = manage(threads, epsilon, a, b);
+	parallel=clock()-start;
+	int t=threads;
+	threads=1;
+	start=clock();
+	long double sres = 1;//manage(threads, epsilon, a, b);
+	sequential=clock()-start;
+	cout<<"Parallel program: sum="<<pres;
+	cout<<" which elapsed "<<parallel<<" seconds"<<endl;
+	cout<<"Sequential program: sum="<<sres;
+	cout<<" which elapsed "<<sequential<<" seconds"<<endl;
+	cout<<"Acceleration S="<<sequential/parallel<<endl;
+	cout<<"Efficiency E="<<sequential/parallel/t<<endl;
 	return 0;
 }
