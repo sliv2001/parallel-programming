@@ -23,7 +23,7 @@ struct thread_handle {
 	pthread_mutex_t mutex;
 	long double a_local, b_local;
 	int recursion_counter;
-	int status; /*0=in progress; 1=finished; 2=ready for calculation*/
+	int status; /*0=in progress; 1=finished; 2=ready for calculation; 3=done, result added*/
 	long double cumulative=0;
 };
 
@@ -38,7 +38,7 @@ void prinths(int i, struct thread_handle* hs){
 }
 
 long double function(long double x){
-	return sin(x);
+	return sin(2*M_PI*1000*x);
 }
 
 long double integrate(long double (*f)(long double x),
@@ -67,7 +67,7 @@ long double integrate_recursive(long double (*f)(long double x),
 		arg->a_local, arg->b_local, 2*n);
 	if (abs(intermed - previous)>epsilon)
 		return integrate_recursive(f, arg, intermed, 2*n);
-	cout<<intermed<<endl;
+//	prinths(&arg);
 	return intermed;
 }
 
@@ -106,7 +106,7 @@ void manage(int threads, long double epsilon, long double a, long double b){
 		pthread_create(&hs[i].tid, NULL, worker, &hs[i]);
 		new_brick++;
 	}
-	while (new_brick<=BRICK_NUMBER){
+	while (new_brick<BRICK_NUMBER){
 		for (int i=0; i<threads; i++){
 			if (pthread_mutex_trylock(&hs[i].mutex)==0 &&
 					hs[i].status==1){
@@ -116,16 +116,32 @@ void manage(int threads, long double epsilon, long double a, long double b){
 				hs[i].b_local=a+(new_brick+1)*brick>b?b:
 						a+(new_brick+1)*brick;
 				hs[i].recursion_counter=0;
-				if (new_brick<=BRICK_NUMBER-threads)
-					hs[i].status=2;
-				else
+				if (new_brick>=BRICK_NUMBER)
 					hs[i].status=3;
-				new_brick++;
+				else{
+					hs[i].status=2;
+					new_brick++;
+				}
 			}
 			pthread_mutex_unlock(&hs[i].mutex);
 		}
 		usleep(10);
 	}
+
+	int done;
+	do{
+		done=0;
+		for (int i=0; i<threads; i++){
+			if (hs[i].status==3)
+				done+=1;
+			if (hs[i].status==1){
+				hs[i].status=3;
+				result+=hs[i].cumulative;
+				done +=1;
+			}
+		}
+		usleep(10);
+	} while (done != threads);
 	cout<<result<<endl;
 }
 
