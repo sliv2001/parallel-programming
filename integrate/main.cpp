@@ -38,7 +38,7 @@ void prinths(int i, struct thread_handle* hs){
 }
 
 long double function(long double x){
-	return 10*sin(2*M_PI*1000*x);
+	return 10*sin(2*M_PI/x);
 }
 
 long double integrate(long double (*f)(long double x),
