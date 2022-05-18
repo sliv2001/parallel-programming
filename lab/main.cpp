@@ -162,6 +162,7 @@ void draw(int N, int M){
 
 int main(int argc, char* argv[]){
 	int numprocs, rank, rc;
+	double s, p;
 	if (rc = MPI_Init(&argc, &argv))
 		abortAll(-1, "Ошибка запуска MPI");
 	MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
@@ -175,7 +176,9 @@ int main(int argc, char* argv[]){
 	h = atof(argv[4]);
 	N = T/tau;
 	M = X/h;
+	p=MPI_Wtime();
 	vector<vector<double>>field = solve(rank, numprocs);
+	p=MPI_Wtime()-p;
 	int ball=0;
 	MPI_Barrier(MPI_COMM_WORLD);
 	if (rank==0){
@@ -189,13 +192,20 @@ int main(int argc, char* argv[]){
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
 	if (rank==0){
+		s=MPI_Wtime();
 		vector<vector<double>> field = solve(0, 1);
+		s=MPI_Wtime()-s;
 		save(field, N, M);
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
 
-	if (rank==0)
+	if (rank==0){
+		cout<<"sequential elapsed "<<s<<endl;
+		cout<<"parallel elapsed "<<p<<endl;
+		cout<<"Acceleration S="<<s/p<<endl;
+		cout<<"Effeciency E="<<s/p/numprocs<<endl;
 		draw(N, M);
+	}
 	MPI_Finalize();
 	return 0;
 }
