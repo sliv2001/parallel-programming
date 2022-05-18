@@ -34,7 +34,7 @@ void abortAll(int rc, string str){
 }
 
 vector<vector<double>> solve(int rank, int numprocs){
-	cout<<rank<<" "<<numprocs<<endl;
+//	cout<<rank<<" "<<numprocs<<endl;
 	if ((M-1)%numprocs==0){
 		brickSize=(M-1)/numprocs;
 		lowSize = brickSize;
@@ -42,6 +42,8 @@ vector<vector<double>> solve(int rank, int numprocs){
 	else {
 		brickSize = (M-1)/(numprocs-1);
 		lowSize = (M-1)%(numprocs-1);
+		if (lowSize==0)
+			abortAll(-6, "");
 	}
 	vector<vector<double>> field(N);
 	int sz;
@@ -62,17 +64,19 @@ vector<vector<double>> solve(int rank, int numprocs){
 	for (int n=0; n<N-1; n++){
 		double left, right;
 		if (rank!=numprocs-1){
-			if (rank!=0)
+			if (rank!=0){
 				MPI_Recv(&left, 1, MPI_DOUBLE, rank-1, 0, MPI_COMM_WORLD, &status);
+//				cout<<left<<endl;
+				field[n+1][0]=f(n*tau, (rank*brickSize)*h)+field[n][0]-
+						tau/2/h*(field[n][1]-left)+
+						tau*tau/2/h/h*(field[n][1]-2*field[n][0]+
+						left);
+			}
 			else{
 				left=x0(n*tau);
 				field[n][0]=left;
 			}
-			field[n+1][0]=f(n*tau, (rank*brickSize)*h)+field[n][0]-
-					tau/2/h*(field[n][1]-left)+
-					tau*tau/2/h/h*(field[n][1]-2*field[n][0]+
-					left);
-			cout<<field[n+1][0]<<endl;
+//			cout<<"nsf"<<rank<<endl;
 			if (rank!=0)
 				MPI_Isend(&field[n+1][0], 1, MPI_DOUBLE, rank-1, 1, MPI_COMM_WORLD, &request);
 			for (int m=1; m<brickSize-1; m++){
@@ -81,21 +85,29 @@ vector<vector<double>> solve(int rank, int numprocs){
 					tau*tau/2/h/h*(field[n][m+1]-2*field[n][m]+
 					field[n][m-1]);
 			}
-			MPI_Recv(&right, 1, MPI_DOUBLE, rank+1, 1, MPI_COMM_WORLD, &status);
 			int m=brickSize-1;
+			if (n!=0)
+				MPI_Recv(&right, 1, MPI_DOUBLE, rank+1, 1, MPI_COMM_WORLD, &status);
+			else
+				right = t0((m+1)*h);
+//			cout<<"nsf"<<rank<<endl;
 			field[n+1][m]=f(n*tau, (rank*brickSize+m)*h)+field[n][m]-
 					tau/2/h*(right-field[n][m-1])+
 					tau*tau/2/h/h*(right-2*field[n][m]+
 					field[n][m-1]);
+//			cout<<"nsf"<<rank<<endl;
 			MPI_Isend(&field[n+1][m], 1, MPI_DOUBLE, rank+1, 0, MPI_COMM_WORLD, &request);
 		}
 		else {
 			if (rank!=0){
+//				cout<<"NSF"<<rank<<endl;
 				MPI_Recv(&left, 1, MPI_DOUBLE, rank-1, 0, MPI_COMM_WORLD, &status);
-				field[n+1][0]=f(n*tau, (rank*brickSize)*h)+field[n][0]-
+//				cout<<"NSF"<<rank<<" "<<lowSize<<endl;
+				/*field[n+1][0]=f(n*tau, (rank*brickSize)*h)+field[n][0]-
 						tau/2/h*(field[n][1]-left)+
 						tau*tau/2/h/h*(field[n][1]-2*field[n][0]+
-						left);
+						left)*/;
+//				cout<<"NSF"<<rank<<endl;
 
 			}
 			else{
@@ -163,15 +175,27 @@ int main(int argc, char* argv[]){
 	h = atof(argv[4]);
 	N = T/tau;
 	M = X/h;
+	vector<vector<double>>field = solve(rank, numprocs);
+	int ball=0;
+	MPI_Barrier(MPI_COMM_WORLD);
+	if (rank==0){
+		save(field, N, M);
+		MPI_Send(&ball, 1, MPI_INT, rank+1, 3, MPI_COMM_WORLD);
+	}else{
+		MPI_Recv(&ball, 1, MPI_INT, rank-1, 3, MPI_COMM_WORLD, &status);
+		save(field, N, M);
+		if (rank<numprocs-1)
+			MPI_Send(&ball, 1, MPI_INT, rank+1, 3, MPI_COMM_WORLD);
+	}
+	MPI_Barrier(MPI_COMM_WORLD);
 	if (rank==0){
 		vector<vector<double>> field = solve(0, 1);
 		save(field, N, M);
-		draw(N, M);
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
-/*	 solve(rank, numprocs);*/
-/*	if (rank==0){
-	}
-*/	MPI_Finalize();
+
+	if (rank==0)
+		draw(N, M);
+	MPI_Finalize();
 	return 0;
 }
