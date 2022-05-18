@@ -1,14 +1,20 @@
 #include <mpi.h>
 #include <iostream>
 #include <unistd.h>
+#include <vector>
 #include "matplotlibcpp.h"
-
-#define MCW MPI_COMM_WORLD
 
 using namespace std;
 namespace plt = matplotlibcpp;
 
-double t0(double t){
+MPI_Status status;
+MPI_Request request;
+
+int N, M;
+double X, T, tau, h;
+int brickSize, lowSize;
+
+double t0(double x){
 	return 1;
 }
 
@@ -22,168 +28,97 @@ double f(double t, double x){
 
 void abortAll(int rc, string str){
 	cout<<str<<endl;
-	MPI_Abort(MCW, rc);
+	MPI_Abort(MPI_COMM_WORLD, rc);
 	exit(0);
 }
 
-double seconds(struct timespec *start, struct timespec *end){
-	return end->tv_sec-start->tv_sec+(end->tv_nsec-start->tv_nsec)/
-			(double)1000000000;
-}
-
-void checkTime(int rank, int length){
-	MPI_Status status;
-	char buffer[length];
-	struct timespec start, end;
-	if (rank==0){
-		sleep(1);
-		clock_gettime(CLOCK_REALTIME, &start);
-		MPI_Send(buffer, length, MPI_CHAR, 1, 0, MCW);
-		MPI_Recv(buffer, length, MPI_CHAR, 1, 0, MCW, &status);
-		clock_gettime(CLOCK_REALTIME, &end);
-		cout<<"Time for transmission "<<seconds(&start, &end)/2<<endl;
-	}
-	else if (rank==1){
-		MPI_Recv(buffer, length, MPI_CHAR, 0, 0, MCW, &status);
-		MPI_Send(buffer, length, MPI_CHAR, 0, 0, MCW);
-	}
-}
-
-double** allocate(int N, int M){
-	double** res = (double**)malloc(sizeof(double*)*N);
-	if (res==NULL)
-		return res;
-	for (int i=0; i<N; i++)
-		if ((res[i]=(double*)malloc(sizeof(double)*M))==NULL)
-			return NULL;
-	return res;
-}
-
-void show(double** field, int N, int M, double h, double tau, double t){
-	int td=t/tau;
-//	cout<<td<<endl;
-	if (td>N)
-		abortAll(-5, "excessive index");
-	vector<double> f(M);
-	vector<double> x(M);
-	for (int i=0; i<M; i++){
-		f[i]=field[td][i];
-		x[i]=i*h;
-	}
-	plt::plot(x, f);
-	plt::show();
-}
-
-void release(double** field, int N, int M){
-	for (int i=0; i<N; i++)
-		free(field[i]);
-	free(field);
-}
-
-void init_table(	double** field,
-			int N,
-			int M,
-			double h,
-			double tau,
-			double (*x0)(double x),
-			double (*t0)(double t)){
-	for (int i=0; i<N; i++)
-		field[i][0]=t0(tau*i);
-	for (int i=0; i<M; i++)
-		field[0][i]=x0(h*i);
-}
-
-void solveBrick(double** u,
-		int N,
-		int M,
-		double h,
-		double tau,
-		int rank,
-		int numprocs){
-	int brickSize, thisSize;
+vector<vector<double>> solve(int rank, int numprocs){
 	if ((M-1)%numprocs==0){
 		brickSize=(M-1)/numprocs;
-		thisSize=brickSize;
+		lowSize = brickSize;
 	}
-	else{
-		brickSize=(M-1)/(numprocs-1);
-		thisSize=brickSize;
-		if (rank+1==numprocs)
-			thisSize=(M-1)%(numprocs-1);
+	else {
+		brickSize = (M-1)/(numprocs-1);
+		lowSize = (M-1)%(numprocs-1);
 	}
-	int a=1+rank*brickSize;
-	int b=1+rank*brickSize+thisSize;
-	cout<<"a="<<a<<endl;
-	cout<<"b="<<b<<endl;
-	for (int n=1; n<N-1; n++){
-//		cout<<"n="<<n<<endl;
-		for (int m=a; m<(rank+1==numprocs?b-1:b); m++){
-			//cout<<m<<endl;
-			u[n+1][m]=f(n*tau, m*h)+u[n][m]-
-					tau/2/h*(u[n][m+1]-u[n][m-1])+
-					tau*tau/2/h/h*(u[n][m+1]-2*u[n][m]+
-					u[n][m-1]);
+	vector<vector<double>> field(N);
+	int sz;
+	if (rank==0)
+		sz=brickSize+1;
+	else if (rank==numprocs-1)
+		sz=lowSize;
+	else
+		sz=brickSize;
+	for (int i=0; i<N; i++)
+		field[i] = vector<double>(sz);
+	for (int i=0; i<(rank==numprocs-1?lowSize:brickSize); i++)
+		field[0][i]=t0(i*h);
+	if (rank==0)
+		for (int i=0; i<N; i++)
+			field[i][0]=x0(i*tau);
+	for (int n=0; n<N-1; n++){
+		double left, right;
+		if (rank!=numprocs-1){
+			if (rank!=0)
+				MPI_Recv(&left, 1, MPI_DOUBLE, rank-1, 0, MPI_COMM_WORLD, &status);
+			else
+				left=x0(n*tau);
+			field[n+1][0]=f(n*tau, (rank*brickSize)*h)+field[n][0]-
+					tau/2/h*(field[n][1]-left)+
+					tau*tau/2/h/h*(field[n][1]-2*field[n][0]+
+					left);
+			if (rank!=0)
+				MPI_Isend(&field[n+1][0], 1, MPI_DOUBLE, rank-1, 1, MPI_COMM_WORLD, &request);
+			for (int m=1; m<brickSize-1; m++){
+				field[n+1][m]=f(n*tau, (rank*brickSize+m)*h)+field[n][m]-
+					tau/2/h*(field[n][m+1]-field[n][m-1])+
+					tau*tau/2/h/h*(field[n][m+1]-2*field[n][m]+
+					field[n][m-1]);
+			}
+			MPI_Recv(&right, 1, MPI_DOUBLE, rank+1, 1, MPI_COMM_WORLD, &status);
+			int m=brickSize-1;
+			field[n+1][m]=f(n*tau, (rank*brickSize+m)*h)+field[n][m]-
+					tau/2/h*(right-field[n][m-1])+
+					tau*tau/2/h/h*(right-2*field[n][m]+
+					field[n][m-1]);
+			MPI_Isend(&field[n+1][m], 1, MPI_DOUBLE, rank+1, 0, MPI_COMM_WORLD, &request);
 		}
-		if (rank+1==numprocs)
-			u[n+1][b-1]=u[n][b-1]+f(n*tau, (b-1)*h)*tau-
-					tau/h*(u[n][b-1]-u[n][b-2]);
+		else {
+			MPI_Recv(&left, 1, MPI_DOUBLE, rank-1, 0, MPI_COMM_WORLD, &status);
+			field[n+1][0]=f(n*tau, (rank*brickSize)*h)+field[n][0]-
+					tau/2/h*(field[n][1]-left)+
+					tau*tau/2/h/h*(field[n][1]-2*field[n][0]+
+					left);
+			MPI_Isend(&field[n+1][0], 1, MPI_DOUBLE, rank-1, 1, MPI_COMM_WORLD, &request);
+			for (int m=1; m<lowSize-1; m++){
+				field[n+1][m]=f(n*tau, (rank*brickSize+m)*h)+field[n][m]-
+					tau/2/h*(field[n][m+1]-field[n][m-1])+
+					tau*tau/2/h/h*(field[n][m+1]-2*field[n][m]+
+					field[n][m-1]);
+			}
+			int m=lowSize-1;
+			field[n+1][m]=field[n][m]+f(n*tau, (m)*h)*tau-
+					tau/h*(field[n][m]-field[n][m-1]);
+		}
 	}
-}
-
-int sequential(	double h,
-		double tau,
-		double X,
-		double T){
-	int M=X/h;
-	int N=T/tau;
-	cout<<"N="<<N<<endl;
-	cout<<"M="<<M<<endl;
-	double** field = allocate(N, M);
-	if (field==NULL){
-	 	abortAll(-4, "allocation error");
-	}
-	init_table(field, N, M, h, tau, x0, t0);
-	solveBrick(field, N, M, h, tau, 0, 1);
-	show(field, N, M, h, tau, 9.9);
-	release(field, N, M);
+	return field;
 }
 
 int main(int argc, char* argv[]){
-/*Setup part*/
-	int rc, rank, numprocs;
-	double h, tau, T, X, t;
-	MPI_Status status;
+	int numprocs, rank, rc;
 	if (rc = MPI_Init(&argc, &argv))
 		abortAll(-1, "Ошибка запуска MPI");
 	MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-	/*if (numprocs<2)
-		abortAll(-2, "Not enough executors");*/
-	if (argc<5)
-		abortAll(-3, "Not enough args");
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	double startTime;
-	if (rank==0)
-		startTime = MPI_Wtime();
-	h=atof(argv[1]);
+
+	if (argc<5)
+		abortAll(-1, "not enough arguments");
+	T = atof(argv[1]);
 	tau = atof(argv[2]);
 	X = atof(argv[3]);
-	T = atof(argv[4]);
-//	checkTime(rank, 128);
-
-/*Transmission*/
-	
-
-/*Parallel part*/
-	
-
-/*Collection*/
-	if (rank==0){
-		cout<<"time elapsed: "<<MPI_Wtime()-startTime<<endl;
-	}
-
-/*Sequential part*/
-	if (rank==0)
-		sequential(h, tau, X, T);
+	h = atof(argv[4]);
+	solve(0, 1);
+	solve(rank, numprocs);
 
 	MPI_Finalize();
 	return 0;
